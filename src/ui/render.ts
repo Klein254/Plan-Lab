@@ -1,7 +1,7 @@
 // Slice extraction and overlay rasterisation shared by the 2D views.
 import type { Volume, Vec3, DoseGrid } from '../core/types.ts';
 import type { Mask } from '../core/mask.ts';
-import { isoSegments } from '../core/contour2d.ts';
+import { isoSegments, chainSegments } from '../core/contour2d.ts';
 import { sampleGrid } from '../core/dose/engine.ts';
 
 export type Plane = 'axial' | 'sagittal' | 'coronal';
@@ -117,6 +117,25 @@ export function maskOutline(key: string, m: Mask, plane: Plane, index: number, w
   if (segCache.size > 600) segCache.clear();
   segCache.set(key, seg);
   return seg;
+}
+
+/** Closed outline loops of a mask slice as a Path2D in plane-pixel coordinates (fill with 'evenodd' so holes stay open). */
+const fillCache = new Map<string, Path2D | null>();
+export function maskFillPath(key: string, m: Mask, plane: Plane, index: number, w: number, h: number): Path2D | null {
+  if (fillCache.has(key)) return fillCache.get(key)!;
+  const seg = maskOutline(key, m, plane, index, w, h);
+  let path: Path2D | null = null;
+  if (seg && seg.length) {
+    path = new Path2D();
+    for (const line of chainSegments(seg)) {
+      path.moveTo(line[0], line[1]);
+      for (let n = 2; n < line.length; n += 2) path.lineTo(line[n], line[n + 1]);
+      path.closePath();
+    }
+  }
+  if (fillCache.size > 600) fillCache.clear();
+  fillCache.set(key, path);
+  return path;
 }
 
 export interface DosePlane {

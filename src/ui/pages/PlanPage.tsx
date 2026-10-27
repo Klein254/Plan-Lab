@@ -10,7 +10,8 @@ import { View3D } from '../views/View3D.tsx';
 import { BEVView } from '../views/BEVView.tsx';
 import { ViewGrid } from '../views/ViewGrid.tsx';
 import { BeamList, BeamEditor, LeafTable } from '../panels/BeamPanel.tsx';
-import { NewPlanDialog, PrescriptionDialog, FieldMatchDialog } from '../panels/PlanDialogs.tsx';
+import { NewPlanDialog, PrescriptionDialog, FieldMatchDialog, AutoMlcDialog } from '../panels/PlanDialogs.tsx';
+import { StructurePicker } from '../panels/StructurePicker.tsx';
 import { openMlc } from '../../core/bev.ts';
 import { newId } from '../../core/templates.ts';
 import { exportRtDose } from '../../core/dicom/export.ts';
@@ -29,7 +30,9 @@ export function PlanPage() {
   const dd = useStore((s) => s.doseDisplay);
   const sel = useStore((s) => s.selectedBeamId);
   useStore((s) => s.planVersion);
-  const [dialog, setDialog] = useState<'new' | 'rx' | 'match' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'rx' | 'match' | 'automlc' | null>(null);
+  const planHidden = useStore((s) => s.planHidden);
+  const structFill = useStore((s) => s.structFill);
   const [layout, setLayout] = useState<Layout>('bev');
 
   if (!ss) {
@@ -102,10 +105,7 @@ export function PlanPage() {
           <ToolButton icon={<Copy size={18} />} label="Duplicate" disabled={!beam} onClick={() => beam && addBeams([{ ...beam, id: newId('b'), name: `${beam.name} copy`, mlc: beam.mlc ? { x1: [...beam.mlc.x1], x2: [...beam.mlc.x2] } : null }])} />
         </ToolGroup>
         <ToolGroup title="Shape">
-          <ToolButton icon={<Scissors size={18} />} label="Auto-MLC" disabled={!beam || !meta.prescription.targetId} onClick={() => {
-            if (!beam || !meta.prescription.targetId) return;
-            updatePlan({ beams: meta.beams.map((b) => (b.id === beam.id ? conformBeam(b, meta.prescription.targetId!, b.autoMlc?.margin ?? 7) : b)) }, false);
-          }} title="Fit MLC + jaws of the selected field to the target (+7 mm)" accent="text-amber-300" />
+          <ToolButton icon={<Scissors size={18} />} label="Auto-MLC" disabled={!beam} onClick={() => setDialog('automlc')} title="Fit the MLC and jaws around an organ or target, with a margin you choose" accent="text-amber-300" />
           <ToolButton icon={<Maximize size={18} />} label="Open MLC" disabled={!beam} onClick={() => beam && updatePlan({ beams: meta.beams.map((b) => (b.id === beam.id ? { ...b, mlc: openMlc(machineById(b.machineId), b.jaws), autoMlc: null } : b)) }, false)} />
           <ToolButton icon={<SplitSquareHorizontal size={18} />} label="Match" onClick={() => setDialog('match')} title="Half-beam blocking and field matching" />
         </ToolGroup>
@@ -166,6 +166,19 @@ export function PlanPage() {
         </div>
         <Select label="Grid" value={String(meta.doseResolution)} onChange={(v) => updatePlan({ doseResolution: +v }, false)} options={[2, 2.5, 3, 4, 5].map((r) => ({ value: String(r), label: `${r} mm` }))} className="w-28" />
         <Toggle checked={meta.heterogeneity} onChange={(v) => updatePlan({ heterogeneity: v }, false)} label="Heterogeneity" />
+        <StructurePicker
+          testId="plan-contours"
+          items={ss.meta.structures.filter((x) => !ss.masks.get(x.id)!.isEmpty())}
+          shown={new Set(ss.meta.structures.filter((x) => !planHidden.includes(x.id)).map((x) => x.id))}
+          onChange={(next) => useStore.setState({ planHidden: ss.meta.structures.filter((x) => !next.has(x.id)).map((x) => x.id) })}
+          footer={
+            <label className="flex items-center gap-2 text-[11px] text-slate-400">
+              Fill
+              <input type="range" min={0} max={0.6} step={0.05} value={structFill} onChange={(e) => useStore.setState({ structFill: +e.target.value })} className="w-32 accent-sky-400" />
+              <span className="w-8 text-slate-300 tabular-nums">{Math.round(structFill * 100)}%</span>
+            </label>
+          }
+        />
         {(() => {
           const miss = fieldsMissingNormPoint();
           return miss.length ? (
@@ -178,11 +191,11 @@ export function PlanPage() {
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] gap-2 p-2">
         <ViewGrid main={layout !== 'slices' ? 'left' : undefined} items={items} />
-        <div className="flex min-h-0 flex-col gap-2 overflow-auto">
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-0.5">
           <BeamList />
           <BeamEditor />
           <LeafTable />
-          <Panel title="Plan">
+          <Panel title="Plan" collapseKey="plan-notes" className="shrink-0">
             <div className="space-y-2 p-3 text-xs">
               <div className="flex items-center gap-2">
                 <span className="text-slate-500">Status</span>
@@ -214,6 +227,7 @@ export function PlanPage() {
       {dialog === 'new' && <NewPlanDialog onClose={() => setDialog(null)} />}
       {dialog === 'rx' && <PrescriptionDialog onClose={() => setDialog(null)} />}
       {dialog === 'match' && <FieldMatchDialog onClose={() => setDialog(null)} />}
+      {dialog === 'automlc' && <AutoMlcDialog onClose={() => setDialog(null)} />}
     </div>
   );
 }

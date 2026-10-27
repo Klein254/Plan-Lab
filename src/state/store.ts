@@ -86,6 +86,8 @@ interface State {
   selectedStructureId: string | null;
   selectedBeamId: string | null;
   doseDisplay: DoseDisplay;
+  structFill: number; // opacity (0–1) of the light colour fill inside contours; 0 = outlines only
+  planHidden: string[]; // structures hidden in Planning / Evaluation views (independent of the contouring eye)
   ssVersion: number; // bumps on any mask/structure change
   planVersion: number;
   doseVersion: number;
@@ -121,6 +123,8 @@ export const useStore = create<State>(() => ({
   selectedStructureId: null,
   selectedBeamId: null,
   doseDisplay: { mode: 'lines', levels: [107, 105, 100, 95, 90, 80, 70, 50, 30], washMin: 30, opacity: 0.45, showHotspot: true },
+  structFill: 0.25,
+  planHidden: [],
   ssVersion: 0,
   planVersion: 0,
   doseVersion: 0,
@@ -571,6 +575,11 @@ export async function deletePlanById(id: string) {
   await db.deletePlan(p.info.id, id);
   await persistRecord({ ...p, plans: p.plans.filter((x) => x.id !== id) });
   if (s.plan?.meta.id === id) set({ plan: null, dose: null });
+}
+
+/** Whether a structure is drawn in a view: the contouring eye in the Anatomical Model, the planning list elsewhere. */
+export function structureShown(st: StructureMeta, mode: 'contour' | 'plan' | 'eval'): boolean {
+  return mode === 'contour' ? st.visible : !get().planHidden.includes(st.id);
 }
 
 export function updatePlan(patch: Partial<PlanMeta>, recalcMu = true) {

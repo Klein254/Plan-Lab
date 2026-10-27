@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useStore, createPlan, updatePlan, updateBeam, machineById, withBusy, toast, saveStructureSet } from '../../state/store.ts';
-import { TECHNIQUES, templateBeams, structureCentre, ssdOf, refitIfAuto, type Technique } from '../../state/planTools.ts';
+import { TECHNIQUES, templateBeams, structureCentre, ssdOf, refitIfAuto, conformBeam, type Technique } from '../../state/planTools.ts';
 import { Modal, Button, NumberField, Select, TextField, Toggle, Badge } from '../common.tsx';
-import { TARGET_TYPES, type NormMode, type Vec3 } from '../../core/types.ts';
-import { matchingAngles } from '../../core/bev.ts';
+import { TARGET_TYPES, type Beam, type NormMode, type Vec3 } from '../../core/types.ts';
+import { matchingAngles, type MlcFit } from '../../core/bev.ts';
+import { maskVolumeCc } from '../../core/maskOps.ts';
 
 export function NewPlanDialog({ onClose }: { onClose: () => void }) {
   const ss = useStore((s) => s.ss)!;
@@ -203,6 +204,91 @@ export function FieldMatchDialog({ onClose }: { onClose: () => void }) {
             <Button size="sm" disabled={!beamA || !ssdB} onClick={() => updateBeam(a, refitIfAuto({ ...beamA!, collimator: +(360 - collCsi).toFixed(1) }))}>Collimator −{collCsi.toFixed(1)}°</Button>
           </div>
         </section>
+      </div>
+    </Modal>
+  );
+}
+
+/** Auto-MLC: asks which organ / volume to conform the leaves to, and with what margin. */
+export function AutoMlcDialog({ onClose, beamId }: { onClose: () => void; beamId?: string | null }) {
+  const ss = useStore((s) => s.ss)!;
+  const ct = useStore((s) => s.ct)!;
+  const plan = useStore((s) => s.plan)!.meta;
+  const beam = plan.beams.find((b) => b.id === (beamId ?? useStore.getState().selectedBeamId)) ?? plan.beams[0];
+  const machine = beam ? machineById(beam.machineId) : null;
+  const order = (t: string) => (t === 'PTV' ? 0 : t === 'CTV' || t === 'ITV' ? 1 : t === 'GTV' ? 2 : TARGET_TYPES.includes(t as never) ? 3 : 4);
+  const options = ss.meta.structures
+    .filter((x) => x.type !== 'EXTERNAL' && x.type !== 'SUPPORT' && !ss.masks.get(x.id)!.isEmpty())
+    .sort((a, b) => order(a.type) - order(b.type));
+  const initial = beam?.autoMlc?.structureId ?? plan.prescription.targetId ?? options[0]?.id ?? '';
+  const [structureId, setStructureId] = useState(initial);
+  const [margin, setMargin] = useState(beam?.autoMlc?.margin ?? 7);
+  const [fit, setFit] = useState<MlcFit>(beam?.autoMlc?.fit ?? 'outside');
+  const [scope, setScope] = useState<'one' | 'all'>('one');
+  const [follow, setFollow] = useState(true);
+  if (!beam || !machine) {
+    return (
+      <Modal title="Auto-MLC" onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+        <p className="text-sm text-slate-300">Add a field first.</p>
+      </Modal>
+    );
+  }
+  const apply = () => {
+    const st = ss.meta.structures.find((x) => x.id === structureId);
+    if (!st) return;
+    const fitOne = (b: Beam) => {
+      const r = conformBeam(b, structureId, margin, fit);
+      return follow ? r : { ...r, autoMlc: null };
+    };
+    const ids = scope === 'all' ? plan.beams.map((b) => b.id) : [beam.id];
+    updatePlan({ beams: plan.beams.map((b) => (ids.includes(b.id) ? fitOne(b) : b)) }, false);
+    toast(`${machineById(beam.machineId).mlc ? 'MLC and jaws' : 'Jaws'} of ${scope === 'all' ? 'all fields' : beam.name} fitted to ${st.name} + ${margin} mm.`, 'success');
+    onClose();
+  };
+  return (
+    <Modal
+      title={`Auto-MLC · ${scope === 'all' ? 'all fields' : beam.name}`}
+      onClose={onClose}
+      width="max-w-xl"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!structureId} onClick={apply}>Fit {machine.mlc ? 'MLC' : 'jaws'}</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <div className="mb-1.5 text-xs text-slate-400">Conform the field around</div>
+          <div className="max-h-56 overflow-auto rounded-lg ring-1 ring-white/10" role="radiogroup">
+            {options.map((x) => (
+              <label key={x.id} className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm ${structureId === x.id ? 'bg-sky-500/15' : 'hover:bg-white/[0.04]'}`}>
+                <input type="radio" name="automlc-structure" checked={structureId === x.id} onChange={() => setStructureId(x.id)} className="accent-sky-400" />
+                <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: x.color }} />
+                <span className="min-w-0 flex-1 truncate text-slate-100">{x.name}</span>
+                <Badge tone={TARGET_TYPES.includes(x.type) ? 'sky' : 'slate'}>{x.type}</Badge>
+                <span className="w-16 text-right text-[11px] text-slate-500 tabular-nums">{maskVolumeCc(ss.masks.get(x.id)!, ct.meta.spacing).toFixed(1)} cc</span>
+              </label>
+            ))}
+            {!options.length && <div className="p-3 text-xs text-slate-500">No contoured structures. Contour a target in the Anatomical Model first.</div>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <NumberField label="Margin around it" unit="mm" value={margin} onChange={setMargin} min={-10} max={40} width="w-20" />
+          {[0, 5, 7, 10, 15].map((m) => (
+            <button key={m} onClick={() => setMargin(m)} className={`h-7 rounded-md px-2 text-xs ring-1 ring-white/10 ${margin === m ? 'bg-sky-500/20 text-sky-200' : 'text-slate-400 hover:bg-white/10'}`}>{m} mm</button>
+          ))}
+        </div>
+        <div className="text-[11px] text-slate-500">The margin is added in the beam’s-eye view (at the isocentre plane). A typical PTV margin for penumbra is 5–8 mm.</div>
+        {machine.mlc && (
+          <Select<MlcFit> label="Leaf fit" value={fit} onChange={setFit} options={[
+            { value: 'outside', label: 'Outside (full coverage)' }, { value: 'centre', label: 'Leaf centre on the edge' }, { value: 'inside', label: 'Inside (spare more)' },
+          ]} />
+        )}
+        <div className="flex flex-wrap items-center gap-4">
+          <Select<'one' | 'all'> label="Apply to" value={scope} onChange={setScope} options={[{ value: 'one', label: `This field (${beam.name})` }, { value: 'all', label: `All ${plan.beams.length} fields` }]} className="w-64" />
+          <Toggle checked={follow} onChange={setFollow} label="Keep following it when gantry / isocentre change" />
+        </div>
       </div>
     </Modal>
   );

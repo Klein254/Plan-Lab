@@ -32,6 +32,7 @@ export function ContourPage() {
   const tool = useStore((s) => s.tool);
   const ts = useStore((s) => s.toolSettings);
   const wl = useStore((s) => s.wl);
+  const structFill = useStore((s) => s.structFill);
   const undoN = useStore((s) => s.undo.length);
   const redoN = useStore((s) => s.redo.length);
   const [dialog, setDialog] = useState<'margin' | 'boolean' | 'auto' | null>(null);
@@ -45,8 +46,14 @@ export function ContourPage() {
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
       const tk = TOOL_KEYS[e.key.toLowerCase()];
       if (tk) setTool(tk);
-      if (e.key === '[') setTs({ pearlRadius: Math.max(1, useStore.getState().toolSettings.pearlRadius - 1) });
-      if (e.key === ']') setTs({ pearlRadius: Math.min(60, useStore.getState().toolSettings.pearlRadius + 1) });
+      // Pearl size: ← / → (Shift for 5 mm steps), or [ ]
+      const st = useStore.getState();
+      const sizeStep = e.key === '[' || e.key === 'ArrowLeft' ? -1 : e.key === ']' || e.key === 'ArrowRight' ? 1 : 0;
+      if (sizeStep && (st.tool === 'pearl' || st.tool === 'eraser' || e.key === '[' || e.key === ']')) {
+        e.preventDefault();
+        const r = st.toolSettings.pearlRadius + sizeStep * (e.shiftKey ? 5 : 1);
+        setTs({ pearlRadius: Math.min(40, Math.max(1, Math.round(r))) });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -115,10 +122,10 @@ export function ContourPage() {
           <ToolButton icon={<Ruler size={18} />} label="Measure" active={tool === 'measure'} onClick={() => setTool('measure')} title="Measure distance (M)" />
         </ToolGroup>
         <ToolGroup title="Draw">
-          <ToolButton icon={<Circle size={18} />} label="Pearl" active={tool === 'pearl'} onClick={() => setTool('pearl')} title="Pearl / ball brush (B). Start inside the structure to push it out, outside to push it in. [ ] change size." />
+          <ToolButton icon={<Circle size={18} />} label="Pearl" active={tool === 'pearl'} onClick={() => setTool('pearl')} title="Pearl / ball brush (B). Start inside the structure to push it out, outside to push it in. ← → change the size (Shift: 5 mm steps)." />
           <ToolButton icon={<PenLine size={18} />} label="Pen" active={tool === 'pen'} onClick={() => setTool('pen')} title="Freehand pen (P): draw a closed outline; it's filled when you release. Alt erases. Draw again elsewhere on the slice for a separate part." />
           <ToolButton icon={<Spline size={18} />} label="Polygon" active={tool === 'polygon'} onClick={() => setTool('polygon')} title="Polygon (G): click points, double-click / Enter / click the first point to close" />
-          <ToolButton icon={<Eraser size={18} />} label="Eraser" active={tool === 'eraser'} onClick={() => setTool('eraser')} title="Eraser (E)" />
+          <ToolButton icon={<Eraser size={18} />} label="Eraser" active={tool === 'eraser'} onClick={() => setTool('eraser')} title="Eraser (E). ← → change the size." />
           <ToolButton icon={<Wand2 size={18} />} label="Wand" active={tool === 'wand'} onClick={() => setTool('wand')} title="Magic wand (W): grows a region of similar HU from where you click" />
         </ToolGroup>
         <ToolGroup title="Slice">
@@ -161,6 +168,7 @@ export function ContourPage() {
               Radius
               <input type="range" min={1} max={40} step={0.5} value={ts.pearlRadius} onChange={(e) => setTs({ pearlRadius: +e.target.value })} className="w-28 accent-sky-400" />
               <span className="w-12 text-slate-200 tabular-nums">{ts.pearlRadius} mm</span>
+              <span className="text-[10px] text-slate-500">← →</span>
             </label>
             {tool === 'pearl' && (
               <Select<'auto' | 'add' | 'erase'> label="Mode" value={ts.pearlMode} onChange={(v) => setTs({ pearlMode: v })} options={[{ value: 'auto', label: 'Auto (push in/out)' }, { value: 'add', label: 'Add' }, { value: 'erase', label: 'Erase' }]} className="w-48" />
@@ -178,7 +186,12 @@ export function ContourPage() {
             <Toggle checked={ts.wand3D} onChange={(v) => setTs({ wand3D: v })} label="3D" />
           </>
         )}
-        <span className="ml-auto flex items-center gap-2 text-slate-500">
+        <label className="ml-auto flex items-center gap-2 text-slate-500" title="Light colour fill inside each contour (0 = outlines only)">
+          Fill
+          <input type="range" min={0} max={0.6} step={0.05} value={structFill} onChange={(e) => useStore.setState({ structFill: +e.target.value })} className="w-20 accent-sky-400" />
+          <span className="w-8 text-slate-300 tabular-nums">{Math.round(structFill * 100)}%</span>
+        </label>
+        <span className="flex items-center gap-2 text-slate-500">
           Propagate
           <NumberField value={propN} onChange={setPropN} min={1} max={100} width="w-14" />
           slices

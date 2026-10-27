@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { useStore, machineById } from '../../state/store.ts';
+import { useStore, machineById, structureShown } from '../../state/store.ts';
 import { downsampleField, maskField, surfaceNets, type MeshData } from '../../core/mesh.ts';
 import { beamAxes } from '../../core/geometry.ts';
 import type { Vec3 } from '../../core/types.ts';
@@ -31,6 +31,7 @@ export function View3D({ mode, onMaximize, maximized }: Props) {
   const [showIso, setShowIso] = useState(true);
   const [building, setBuilding] = useState(false);
   const ssVersion = useStore((s) => s.ssVersion);
+  const planHidden = useStore((s) => s.planHidden);
   const planVersion = useStore((s) => s.planVersion);
   const doseVersion = useStore((s) => s.doseVersion);
   const ctId = useStore((s) => s.ct?.meta.id);
@@ -122,7 +123,7 @@ export function View3D({ mode, onMaximize, maximized }: Props) {
     if (!ss) return;
     const { spacing, origin } = s.ct.meta;
     for (const st of ss.meta.structures) {
-      if (!st.visible || st.type === 'EXTERNAL') continue;
+      if (!structureShown(st, mode) || st.type === 'EXTERNAL') continue;
       const m = ss.masks.get(st.id);
       if (!m) continue;
       const key = `${st.id}:${m.version}`;
@@ -142,7 +143,7 @@ export function View3D({ mode, onMaximize, maximized }: Props) {
       mesh.renderOrder = target ? 2 : 1;
       g.add(mesh);
     }
-  }, [ssVersion, ctId]);
+  }, [ssVersion, ctId, planHidden, mode]);
 
   // Skin (from the Body structure)
   useEffect(() => {
@@ -152,7 +153,7 @@ export function View3D({ mode, onMaximize, maximized }: Props) {
     const g = t.groups.skin;
     g.clear();
     const body = s.ss?.meta.structures.find((x) => x.type === 'EXTERNAL');
-    if (!showSkin || !body || !body.visible) return;
+    if (!showSkin || !body || !structureShown(body, mode)) return;
     const m = s.ss!.masks.get(body.id)!;
     const key = `${body.id}:${m.version}`;
     if (!meshCache.has(key)) {
@@ -165,7 +166,7 @@ export function View3D({ mode, onMaximize, maximized }: Props) {
     const mesh = new THREE.Mesh(toGeometry(md), new THREE.MeshStandardMaterial({ color: '#e8c4a8', transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }));
     mesh.renderOrder = 5;
     g.add(mesh);
-  }, [ssVersion, ctId, showSkin]);
+  }, [ssVersion, ctId, showSkin, planHidden, mode]);
 
   // Bones from the CT (HU threshold)
   useEffect(() => {

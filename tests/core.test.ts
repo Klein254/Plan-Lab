@@ -11,6 +11,7 @@ import { buildDensity, DEFAULT_HU_CURVE, makeDoseGrid } from '../src/core/dose/d
 import { DEFAULT_MACHINES, pdd, tmr } from '../src/core/machines.ts';
 import { computeDVH, dAt, evaluateConstraint, vAt } from '../src/core/dvh.ts';
 import type { Beam, ImageSetMeta, PatientInfo, Vec3, Volume } from '../src/core/types.ts';
+import { gEUD, lkbNtcp, lkbFor, normalCdf, integralDose } from '../src/core/radiobiology.ts';
 
 function load(opts: Parameters<typeof makePhantom>[0]) {
   const files = makePhantom(opts);
@@ -244,4 +245,26 @@ test('RTSTRUCT export reads back with the same structure volumes', () => {
   const rel = (a: number, b: number) => Math.abs(a - b) / b;
   assert.ok(rel(back[0].mask.count(), body.count()) < 0.03, `body ${back[0].mask.count()} vs ${body.count()}`);
   assert.ok(rel(back[1].mask.count(), s.count()) < 0.12, `gtv ${back[1].mask.count()} vs ${s.count()}`);
+});
+
+test('radiobiology: gEUD limits, LKB NTCP and parameter lookup', () => {
+  const dvhOf = (doses: number[]) => {
+    const samples = Float32Array.from(doses).sort();
+    return { volumeCc: 100, samples, min: samples[0], max: samples[samples.length - 1], mean: doses.reduce((a, b) => a + b, 0) / doses.length };
+  };
+  const d = dvhOf([10, 20, 30, 40]);
+  assert.ok(Math.abs(gEUD(d, 1) - 25) < 1e-9, 'a = 1 is the mean dose');
+  assert.ok(gEUD(d, 40) > 38 && gEUD(d, 40) <= 40, 'large a tends to the max');
+  assert.ok(gEUD(d, -40) < 11 && gEUD(d, -40) >= 10, 'negative a tends to the min');
+  assert.ok(Math.abs(normalCdf(0) - 0.5) < 1e-7 && Math.abs(normalCdf(1.959964) - 0.975) < 1e-4);
+  // A uniform dose equal to TD50 gives NTCP = 50% whatever the volume effect
+  const rect = lkbFor('Rectum')!;
+  assert.equal(rect.organ, 'Rectum');
+  assert.ok(Math.abs(lkbNtcp(dvhOf([80, 80, 80]), rect).ntcp - 0.5) < 1e-6);
+  assert.ok(lkbNtcp(dvhOf([40, 40, 40]), rect).ntcp < 0.01);
+  assert.equal(lkbFor('Lung_L')!.organ, 'Lung');
+  assert.equal(lkbFor('Brainstem')!.organ, 'Brainstem');
+  assert.equal(lkbFor('Brain')!.organ, 'Brain');
+  assert.equal(lkbFor('PTV'), null);
+  assert.ok(Math.abs(integralDose(d) - 2.5) < 1e-9, '25 Gy mean over 100 cc of water = 2.5 J');
 });

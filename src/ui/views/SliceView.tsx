@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { useStore, beginStroke, editMask, toast, machineById, type Stroke } from '../../state/store.ts';
+import { useStore, beginStroke, editMask, toast, machineById, structureShown, type Stroke } from '../../state/store.ts';
 import {
-  planeInfo, planeToVoxel, voxelToPlane, sliceIndex, extractCT, greyImage, maskOutline, sampleDosePlane, doseSegments,
-  isodoseColor, washColor, hexToRgb, extractMask, type Plane, type DosePlane,
+  planeInfo, planeToVoxel, voxelToPlane, sliceIndex, extractCT, greyImage, maskOutline, maskFillPath, sampleDosePlane, doseSegments,
+  isodoseColor, washColor, extractMask, type Plane, type DosePlane,
 } from '../render.ts';
 import { fillPolygon } from '../../core/contour2d.ts';
 import { regionGrow } from '../../core/maskOps.ts';
@@ -137,29 +137,32 @@ export function SliceView({ plane, mode, onMaximize, maximized }: Props) {
       }
     }
 
-    // Structures
+    // Structures: a light fill in each structure's colour, then its outline
     const ss = s.ss;
     if (ss) {
+      const [ox, oy] = toScreen(0, 0);
+      const [px1] = toScreen(1, 0);
+      const [, py1] = toScreen(0, 1);
       for (const st of ss.meta.structures) {
-        if (!st.visible) continue;
+        if (!structureShown(st, mode)) continue;
         const m = ss.masks.get(st.id);
         if (!m) continue;
         const selected = st.id === s.selectedStructureId && mode === 'contour';
-        if (selected) {
-          const pm = extractMask(m, plane, index);
-          if (pm) {
-            const off = document.createElement('canvas');
-            off.width = info.w;
-            off.height = info.h;
-            const id = new ImageData(info.w, info.h);
-            const [r, g, b] = hexToRgb(st.color);
-            for (let p = 0; p < pm.length; p++) if (pm[p]) { id.data[p * 4] = r; id.data[p * 4 + 1] = g; id.data[p * 4 + 2] = b; id.data[p * 4 + 3] = 60; }
-            off.getContext('2d')!.putImageData(id, 0, 0);
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(off, x0, y0, info.w * info.sw * scale, info.h * info.sh * scale);
+        const key = `${st.id}:${m.version}:${plane}:${index}`;
+        // The Body / couch would tint the whole patient, so they're only filled while being edited
+        const fillAlpha = selected ? Math.max(0.3, s.structFill * 1.4) : st.type === 'EXTERNAL' || st.type === 'SUPPORT' ? 0 : s.structFill;
+        if (fillAlpha > 0) {
+          const path = maskFillPath(key, m, plane, index, info.w, info.h);
+          if (path) {
+            ctx.setTransform(dpr * (px1 - ox), 0, 0, dpr * (py1 - oy), dpr * ox, dpr * oy);
+            ctx.fillStyle = st.color;
+            ctx.globalAlpha = Math.min(0.8, fillAlpha);
+            ctx.fill(path, 'evenodd');
+            ctx.globalAlpha = 1;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           }
         }
-        const seg = maskOutline(`${st.id}:${m.version}:${plane}:${index}`, m, plane, index, info.w, info.h);
+        const seg = maskOutline(key, m, plane, index, info.w, info.h);
         if (!seg || !seg.length) continue;
         ctx.strokeStyle = st.color;
         ctx.lineWidth = selected ? 2 : 1.4;

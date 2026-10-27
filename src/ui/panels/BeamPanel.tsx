@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Copy, Trash2, Plus, FlipHorizontal2, Crosshair, Target, ChevronDown, ChevronRight } from 'lucide-react';
+import { Copy, Trash2, Plus, FlipHorizontal2, Crosshair, Target } from 'lucide-react';
 import { useStore, updateBeam, addBeams, deleteBeam, machineById, toast, doseIsStale, updatePlan, voxelToPatient } from '../../state/store.ts';
-import { conformBeam, refitIfAuto, ssdOf, makeBeam, structureCentre } from '../../state/planTools.ts';
+import { refitIfAuto, ssdOf, makeBeam, structureCentre } from '../../state/planTools.ts';
+import { AutoMlcDialog } from './PlanDialogs.tsx';
 import { Panel, NumberField, Select, IconBtn, Button, cx, Badge } from '../common.tsx';
 import { openMlc, clampJaws } from '../../core/bev.ts';
 import { newId } from '../../core/templates.ts';
@@ -21,6 +22,8 @@ export function BeamList() {
   const stale = doseIsStale();
   return (
     <Panel
+      collapseKey="plan-fields"
+      className="shrink-0"
       title={`Treatment fields (${plan.beams.length})`}
       actions={
         <IconBtn title="Add a beam (copy of the selected one, or AP)" onClick={() => {
@@ -76,16 +79,14 @@ export function BeamEditor() {
   const sel = useStore((s) => s.selectedBeamId);
   const ss = useStore((s) => s.ss);
   const lib = useStore((s) => s.lib);
-  const [mlcStructure, setMlcStructure] = useState<string>('');
-  const [mlcMargin, setMlcMargin] = useState(7);
-  const [fit, setFit] = useState<'outside' | 'centre' | 'inside'>('outside');
+  const [autoMlc, setAutoMlc] = useState(false);
   const beam = plan?.beams.find((b) => b.id === sel);
-  if (!plan || !beam || !ss) return <Panel title="Field"><div className="p-3 text-xs text-slate-500">Select a field.</div></Panel>;
+  if (!plan || !beam || !ss) return <Panel title="Field" collapseKey="plan-field" className="shrink-0"><div className="p-3 text-xs text-slate-500">Select a field.</div></Panel>;
   const machine = machineById(beam.machineId);
   const ssd = ssdOf(beam);
   const targets = ss.meta.structures.filter((x) => !ss.masks.get(x.id)!.isEmpty() && x.type !== 'EXTERNAL');
   const defaultTarget = beam.autoMlc?.structureId ?? plan.prescription.targetId ?? targets.find((t) => TARGET_TYPES.includes(t.type))?.id ?? '';
-  const structureId = mlcStructure || defaultTarget;
+  const follows = beam.autoMlc ? ss.meta.structures.find((x) => x.id === beam.autoMlc!.structureId) : null;
 
   // Geometry changes keep auto-MLC beams conformed to their structure
   const geo = (patch: Partial<Beam>) => updateBeam(beam.id, refitIfAuto({ ...beam, ...patch }));
@@ -93,6 +94,8 @@ export function BeamEditor() {
 
   return (
     <Panel
+      collapseKey="plan-field"
+      className="shrink-0"
       title={`Field: ${beam.name}`}
       actions={
         <>
@@ -191,24 +194,16 @@ export function BeamEditor() {
         <div className="rounded-lg bg-white/[0.03] p-2.5 ring-1 ring-white/5">
           <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
             {machine.mlc ? 'Auto-MLC' : 'Fit jaws to structure'}
-            {beam.autoMlc && <Badge tone="green">follows {ss.meta.structures.find((x) => x.id === beam.autoMlc!.structureId)?.name}</Badge>}
+            {follows && <Badge tone="green">follows {follows.name} + {beam.autoMlc!.margin} mm</Badge>}
           </div>
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <Select value={structureId} onChange={setMlcStructure} options={targets.map((t) => ({ value: t.id, label: t.name }))} />
-            <NumberField unit="mm" value={mlcMargin} onChange={setMlcMargin} min={-10} max={40} width="w-16" />
-          </div>
-          {machine.mlc && (
-            <Select<'outside' | 'centre' | 'inside'> label="Leaf fit" value={fit} onChange={setFit} className="mt-2" options={[
-              { value: 'outside', label: 'Outside (full coverage)' }, { value: 'centre', label: 'Leaf centre on edge' }, { value: 'inside', label: 'Inside (spare more)' },
-            ]} />
-          )}
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Button size="sm" variant="primary" disabled={!structureId} onClick={() => updateBeam(beam.id, conformBeam(beam, structureId, mlcMargin, fit))}>Fit this field</Button>
-            <Button size="sm" disabled={!structureId} onClick={() => updatePlan({ beams: plan.beams.map((b) => conformBeam(b, structureId, mlcMargin, fit)) }, false)}>Fit all fields</Button>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant="primary" onClick={() => setAutoMlc(true)}>{machine.mlc ? 'Auto-MLC…' : 'Fit jaws…'}</Button>
             {machine.mlc && <Button size="sm" variant="ghost" onClick={() => updateBeam(beam.id, { mlc: openMlc(machine, beam.jaws), autoMlc: null })}>Open leaves</Button>}
           </div>
+          {machine.mlc && <div className="mt-1.5 text-[10px] text-slate-500">Or drag inside the field in the BEV to shape the leaves by hand.</div>}
         </div>
       </div>
+      {autoMlc && <AutoMlcDialog beamId={beam.id} onClose={() => setAutoMlc(false)} />}
     </Panel>
   );
 }
@@ -226,7 +221,6 @@ function JawField({ label, value, onChange, onHalf }: { label: string; value: nu
 export function LeafTable() {
   const plan = useStore((s) => s.plan)?.meta;
   const sel = useStore((s) => s.selectedBeamId);
-  const [open, setOpen] = useState(false);
   const beam = plan?.beams.find((b) => b.id === sel);
   if (!beam) return null;
   const machine = machineById(beam.machineId);
@@ -240,12 +234,8 @@ export function LeafTable() {
     updateBeam(beam.id, { mlc: { x1, x2 }, autoMlc: null });
   };
   return (
-    <Panel title={
-      <button className="flex items-center gap-1" onClick={() => setOpen((o) => !o)}>
-        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} MLC leaves ({pairs} pairs)
-      </button>
-    }>
-      {open && (
+    <Panel collapseKey="plan-leaves" defaultOpen={false} className="shrink-0" title={`MLC leaves (${pairs} pairs)`}>
+      {(
         <div className="max-h-72 overflow-auto">
           <table className="w-full text-[11px] tabular-nums">
             <thead className="sticky top-0 bg-[#0c111c] text-slate-500">

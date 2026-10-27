@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type ButtonHTMLAttributes } from 'react';
-import { X } from 'lucide-react';
+import { X, ChevronDown, ChevronRight } from 'lucide-react';
 
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(' ');
@@ -187,16 +187,44 @@ export function Modal({ title, onClose, children, footer, width = 'max-w-lg' }: 
   );
 }
 
-export function Panel({ title, actions, children, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+const readOpen = (key: string, fallback: boolean) => {
+  try {
+    const v = localStorage.getItem(`panel:${key}`);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+};
+
+/**
+ * Titled card. With `collapseKey` the header toggles the body open/closed (remembered per key on this computer).
+ */
+export function Panel({ title, actions, children, className, collapseKey, defaultOpen = true }: {
+  title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; collapseKey?: string; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(() => (collapseKey ? readOpen(collapseKey, defaultOpen) : true));
+  const toggle = () => {
+    setOpen((o) => {
+      try { localStorage.setItem(`panel:${collapseKey}`, o ? '0' : '1'); } catch { /* storage unavailable */ }
+      return !o;
+    });
+  };
   return (
     <section className={cx('flex min-h-0 flex-col rounded-xl bg-[#0c111c] ring-1 ring-white/[0.06]', className)}>
       {(title || actions) && (
-        <header className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3">
-          <h3 className="truncate text-[11px] font-semibold tracking-wider text-slate-400 uppercase">{title}</h3>
-          <div className="flex items-center gap-1">{actions}</div>
+        <header className={cx('flex h-9 shrink-0 items-center justify-between gap-2 px-3', open && 'border-b border-white/[0.06]')}>
+          {collapseKey ? (
+            <button onClick={toggle} className="flex min-w-0 items-center gap-1 text-left text-slate-400 hover:text-slate-200" title={open ? 'Collapse' : 'Expand'} aria-expanded={open}>
+              {open ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
+              <h3 className="truncate text-[11px] font-semibold tracking-wider uppercase">{title}</h3>
+            </button>
+          ) : (
+            <h3 className="truncate text-[11px] font-semibold tracking-wider text-slate-400 uppercase">{title}</h3>
+          )}
+          {open && <div className="flex items-center gap-1">{actions}</div>}
         </header>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      {open && <div className="min-h-0 flex-1 overflow-auto">{children}</div>}
     </section>
   );
 }
