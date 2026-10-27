@@ -1,0 +1,58 @@
+name: Build PlanLab
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ''
+            artifact: src-tauri/target/release/bundle/nsis/*.exe
+          - name: macOS-AppleSilicon
+            os: macos-latest
+            args: --target aarch64-apple-darwin
+            artifact: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          - name: macOS-Intel
+            os: macos-latest
+            args: --target x86_64-apple-darwin
+            artifact: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ startsWith(matrix.os, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npx tauri build ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PlanLab-${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error

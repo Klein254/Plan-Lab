@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- PlanLab: isodose rings around a target, crossed by four treatment beams -->
+  <rect width="1024" height="1024" rx="220" fill="#0B1220"/>
+  <g fill="none" stroke-width="34">
+    <circle cx="512" cy="512" r="300" stroke="#1D4ED8" opacity="0.9"/>
+    <circle cx="512" cy="512" r="215" stroke="#10B981"/>
+    <circle cx="512" cy="512" r="135" stroke="#F59E0B"/>
+  </g>
+  <circle cx="512" cy="512" r="62" fill="#EF4444"/>
+  <g stroke="#E2E8F0" stroke-width="22" stroke-linecap="round" opacity="0.85">
+    <line x1="512" y1="90" x2="512" y2="330"/>
+    <line x1="512" y1="694" x2="512" y2="934"/>
+    <line x1="90" y1="512" x2="330" y2="512"/>
+    <line x1="694" y1="512" x2="934" y2="512"/>
+  </g>
+</svg>

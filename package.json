@@ -1,0 +1,40 @@
+{
+  "name": "planlab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "PlanLab: a radiotherapy treatment planning system for student training",
+  "scripts": {
+    "dev": "vite --port=5180 --host=127.0.0.1",
+    "build": "vite build",
+    "lint": "tsc --noEmit",
+    "test": "node --test tests/core.test.ts",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-dialog": "2.8.3",
+    "dicom-parser": "1.8.21",
+    "fflate": "0.8.2",
+    "jpeg-lossless-decoder-js": "2.1.2",
+    "lucide-react": "0.546.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "three": "0.180.0",
+    "zustand": "5.0.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.1",
+    "@tauri-apps/cli": "2.12.4",
+    "@types/node": "22.19.21",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/three": "0.180.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "tailwindcss": "4.3.1",
+    "typescript": "5.8.3",
+    "vite": "6.4.3"
+  }
+}

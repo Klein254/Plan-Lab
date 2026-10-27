@@ -1,0 +1,44 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "PlanLab",
+  "version": "0.1.0",
+  "identifier": "com.planlab.tps",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5180",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PlanLab",
+        "width": 1480,
+        "height": 920,
+        "minWidth": 1100,
+        "minHeight": 680,
+        "center": true,
+        "resizable": true,
+        "theme": "Dark",
+        "backgroundColor": "#070B12",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "PlanLab",
+    "copyright": "© 2026 PlanLab",
+    "category": "Education",
+    "shortDescription": "Radiotherapy treatment planning for student training",
+    "longDescription": "PlanLab is a teaching treatment planning system: import CT (DICOM), contour targets and organs at risk, place and shape beams (jaws, MLC, wedges), calculate 3D dose and evaluate DVHs against tolerance doses. Not for clinical use.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "11.0" },
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  }
+}
