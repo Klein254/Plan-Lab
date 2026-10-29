@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Plus, Calculator, Scissors, Maximize, SplitSquareHorizontal, Crosshair, MapPin, ClipboardList, LayoutGrid, Box, Rows3, Copy, CheckCircle2, AlertTriangle, FileOutput, FilePlus2,
+  Plus, Calculator, Scissors, Layers, Scale, Maximize, SplitSquareHorizontal, Crosshair, MapPin, ClipboardList, LayoutGrid, Box, Rows3, Copy, CheckCircle2, AlertTriangle, FileOutput, FilePlus2,
 } from 'lucide-react';
 import { useStore, calculateDose, doseIsStale, updatePlan, addBeams, machineById, toast, voxelToPatient, openPlan, recomputeMU, fieldsMissingNormPoint } from '../../state/store.ts';
 import { conformBeam, makeBeam, refitIfAuto } from '../../state/planTools.ts';
@@ -12,6 +12,8 @@ import { ViewGrid } from '../views/ViewGrid.tsx';
 import { BeamList, BeamEditor, LeafTable } from '../panels/BeamPanel.tsx';
 import { NewPlanDialog, PrescriptionDialog, FieldMatchDialog, AutoMlcDialog } from '../panels/PlanDialogs.tsx';
 import { StructurePicker } from '../panels/StructurePicker.tsx';
+import { FifPanel } from '../panels/FifPanel.tsx';
+import { WeightingGuide } from '../panels/WeightingGuide.tsx';
 import { openMlc } from '../../core/bev.ts';
 import { newId } from '../../core/templates.ts';
 import { exportRtDose } from '../../core/dicom/export.ts';
@@ -30,7 +32,8 @@ export function PlanPage() {
   const dd = useStore((s) => s.doseDisplay);
   const sel = useStore((s) => s.selectedBeamId);
   useStore((s) => s.planVersion);
-  const [dialog, setDialog] = useState<'new' | 'rx' | 'match' | 'automlc' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'rx' | 'match' | 'automlc' | 'weights' | null>(null);
+  const [fifOpen, setFifOpen] = useState(false);
   const planHidden = useStore((s) => s.planHidden);
   const structFill = useStore((s) => s.structFill);
   const [layout, setLayout] = useState<Layout>('bev');
@@ -108,6 +111,10 @@ export function PlanPage() {
           <ToolButton icon={<Scissors size={18} />} label="Auto-MLC" disabled={!beam} onClick={() => setDialog('automlc')} title="Fit the MLC and jaws around an organ or target, with a margin you choose" accent="text-amber-300" />
           <ToolButton icon={<Maximize size={18} />} label="Open MLC" disabled={!beam} onClick={() => beam && updatePlan({ beams: meta.beams.map((b) => (b.id === beam.id ? { ...b, mlc: openMlc(machineById(b.machineId), b.jaws), autoMlc: null } : b)) }, false)} />
           <ToolButton icon={<SplitSquareHorizontal size={18} />} label="Match" onClick={() => setDialog('match')} title="Half-beam blocking and field matching" />
+          <ToolButton icon={<Layers size={18} />} label="Field-in-field" active={fifOpen} disabled={!meta.beams.length} onClick={() => setFifOpen((o) => !o)} title="Field-in-field: add segments that block the hot spots" accent="text-pink-300" />
+        </ToolGroup>
+        <ToolGroup title="Weights">
+          <ToolButton icon={<Scale size={18} />} label="Weighting" disabled={!meta.beams.length} onClick={() => setDialog('weights')} title="Beam weighting guide: preview, suggested weights and typical weights by site" accent="text-sky-300" />
         </ToolGroup>
         <ToolGroup title="Points">
           <ToolButton icon={<Crosshair size={18} />} label="Iso → cross" onClick={() => {
@@ -192,6 +199,7 @@ export function PlanPage() {
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] gap-2 p-2">
         <ViewGrid main={layout !== 'slices' ? 'left' : undefined} items={items} />
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-0.5">
+          {fifOpen && <FifPanel onClose={() => setFifOpen(false)} />}
           <BeamList />
           <BeamEditor />
           <LeafTable />
@@ -228,6 +236,7 @@ export function PlanPage() {
       {dialog === 'rx' && <PrescriptionDialog onClose={() => setDialog(null)} />}
       {dialog === 'match' && <FieldMatchDialog onClose={() => setDialog(null)} />}
       {dialog === 'automlc' && <AutoMlcDialog onClose={() => setDialog(null)} />}
+      {dialog === 'weights' && <WeightingGuide onClose={() => setDialog(null)} />}
     </div>
   );
 }

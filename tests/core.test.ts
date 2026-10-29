@@ -12,6 +12,11 @@ import { DEFAULT_MACHINES, pdd, tmr } from '../src/core/machines.ts';
 import { computeDVH, dAt, evaluateConstraint, vAt } from '../src/core/dvh.ts';
 import type { Beam, ImageSetMeta, PatientInfo, Vec3, Volume } from '../src/core/types.ts';
 import { gEUD, lkbNtcp, lkbFor, normalCdf, integralDose } from '../src/core/radiobiology.ts';
+import { loadCodecs, decodeFrame } from '../src/core/dicom/codecs.ts';
+import { createRequire } from 'node:module';
+import { blockHotRegion, suggestSubfieldFraction } from '../src/core/fif.ts';
+import { matrix, suggestWeights } from '../src/core/weighting.ts';
+import { openMlc as openLeaves } from '../src/core/bev.ts';
 
 function load(opts: Parameters<typeof makePhantom>[0]) {
   const files = makePhantom(opts);
@@ -267,4 +272,79 @@ test('radiobiology: gEUD limits, LKB NTCP and parameter lookup', () => {
   assert.equal(lkbFor('Brain')!.organ, 'Brain');
   assert.equal(lkbFor('PTV'), null);
   assert.ok(Math.abs(integralDose(d) - 2.5) < 1e-9, '25 Gy mean over 100 cc of water = 2.5 J');
+});
+
+test('field-in-field: hot region is blocked by the bank that sacrifices less open field', () => {
+  const machine = DEFAULT_MACHINES.find((m) => m.id === 'linac-a')!;
+  const jaws = { x1: -50, x2: 50, y1: -50, y2: 50 };
+  const parent = { id: 'p', name: 'AP', machineId: machine.id, energy: '6X', gantry: 0, collimator: 0, couch: 0, iso: [0, 0, 0], jaws, mlc: openLeaves(machine, jaws), wedge: { type: 'none', angle: 0, orientation: 'left' }, weight: 1, autoMlc: null } as Beam;
+  // Hot region x 20…40 mm, y −10…10 mm (2 mm raster)
+  const res = 2, half = 100, w = Math.round((2 * half) / res) + 1;
+  const data = new Uint8Array(w * w);
+  for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+    const X = -half + x * res, Y = -half + y * res;
+    if (X >= 21 && X <= 39 && Y >= -9 && Y <= 9) data[x + y * w] = 1;
+  }
+  const shape = blockHotRegion(machine, parent, { data, w, h: w, x0: -half, y0: -half, res })!;
+  const B = machine.mlc!.boundaries;
+  for (let p = 0; p < B.length - 1; p++) {
+    const mid = (B[p] + B[p + 1]) / 2;
+    if (mid > -8 && mid < 8) {
+      assert.ok(Math.abs(shape.mlc.x2[p] - 20) <= 1.5, `pair ${p}: X2 closes back to the hot region (${shape.mlc.x2[p]})`);
+      assert.equal(shape.mlc.x1[p], -50, 'X1 bank stays open');
+    }
+    if (B[p] >= 15 || B[p + 1] <= -15) assert.equal(shape.mlc.x2[p], 50, `pair ${p} away from the hot spot stays open`);
+  }
+  assert.ok(shape.blockedFraction > 0.05 && shape.blockedFraction < 0.15, `blocked ${shape.blockedFraction}`);
+  assert.ok(Math.abs(suggestSubfieldFraction(1.1, 1.05, 0.5) - 0.1) < 1e-9);
+  assert.equal(suggestSubfieldFraction(1.0, 1.05, 0.5), 0);
+});
+
+test('suggested weights: target uniformity, and organ-at-risk sparing shifts weight away from the OAR side', () => {
+  // AP/PA through a 20 cm patient (x = depth from anterior), simple attenuation, normalised at the midline
+  const k = 0.05;
+  const nAP = (x: number) => Math.exp(-k * x) / Math.exp(-k * 10);
+  const nPA = (x: number) => Math.exp(-k * (20 - x)) / Math.exp(-k * 10);
+  const fill = (xs: number[]) => {
+    const m = matrix(xs.length, 2);
+    xs.forEach((x, r) => { m.a[r * 2] = nAP(x); m.a[r * 2 + 1] = nPA(x); });
+    return m;
+  };
+  const target = fill([3, 4, 5, 6, 7]);
+  const oar = fill([16, 17, 18]);
+  const free = suggestWeights({ target, oars: [{ m: oar, importance: 0 }] });
+  // Flattening a shallow target needs more from the far (PA) side: weight ratio ≈ e^{k(20−2·5)} = 1.65
+  assert.ok(free[1] > free[0], `PA ${free[1]} > AP ${free[0]}`);
+  assert.ok(Math.abs(free[1] / free[0] - Math.exp(k * 10)) < 0.15, `ratio ${free[1] / free[0]}`);
+  const spare = suggestWeights({ target, oars: [{ m: oar, importance: 3 }] });
+  assert.ok(spare[1] / spare[0] < free[1] / free[0], `posterior OAR lowers the PA share (${spare[1] / spare[0]} < ${free[1] / free[0]})`);
+});
+
+test('JPEG 2000 and JPEG-LS compressed CT pixels decode bit-exactly', async () => {
+  await loadCodecs();
+  const require = createRequire(import.meta.url);
+  // A signed 16-bit CT-like slice: air, soft tissue, bone, with a gradient
+  const w = 64, h = 48;
+  const px = new Int16Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) px[x + y * w] = (x - 32) ** 2 + (y - 24) ** 2 < 400 ? ((x * 37 + y * 11) % 900) - 50 : -1000;
+  const raw = new Uint8Array(px.buffer);
+  const frame = { width: w, height: h, bitsPerSample: 16, componentCount: 1, isSigned: true };
+  const quiet = () => undefined;
+  for (const [pkg, kind, Enc] of [['@cornerstonejs/codec-openjpeg/wasmjs', 'j2k', 'J2KEncoder'], ['@cornerstonejs/codec-charls/wasmjs', 'jls', 'JpegLSEncoder']] as const) {
+    const factory = require(pkg);
+    const wasmPath = require.resolve(pkg.replace('wasmjs', 'wasm'));
+    const mod = await factory({ locateFile: (f: string) => (f.endsWith('.wasm') ? wasmPath : f), print: quiet, printErr: quiet });
+    const enc = new mod[Enc]();
+    enc.getDecodedBuffer(frame).set(raw);
+    if (kind === 'j2k') enc.setQuality(true, 0);
+    else enc.setNearLossless(0);
+    enc.encode();
+    const encoded = enc.getEncodedBuffer().slice();
+    enc.delete();
+    assert.ok(encoded.length < raw.length, `${kind} actually compresses`);
+    const d = decodeFrame(kind, encoded);
+    assert.equal(d.bits, 16);
+    const back = new Int16Array(d.bytes.buffer, d.bytes.byteOffset, w * h);
+    assert.deepEqual(Array.from(back), Array.from(px), `${kind} round trip is lossless`);
+  }
 });

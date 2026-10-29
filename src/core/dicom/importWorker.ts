@@ -1,5 +1,6 @@
 // Parses dropped/selected DICOM files off the UI thread.
 import { parseInstance, type ParsedInstance } from './parse.ts';
+import { loadCodecs } from './codecs.ts';
 
 export type ImportMessage =
   | { type: 'progress'; done: number; total: number }
@@ -11,6 +12,8 @@ self.onmessage = async (ev: MessageEvent<{ files: File[] }>) => {
   const errors: string[] = [];
   let skipped = 0;
   const post = (m: ImportMessage, t: Transferable[] = []) => (self as unknown as Worker).postMessage(m, t);
+  // JPEG 2000 / JPEG-LS decoders (a failure only matters if such files turn up; parse then reports it per file)
+  await loadCodecs().catch(() => undefined);
   for (let n = 0; n < files.length; n++) {
     const f = files[n];
     try {

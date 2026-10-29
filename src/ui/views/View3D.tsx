@@ -208,7 +208,7 @@ export function View3D({ mode, onMaximize, maximized }: Props) {
     g.clear();
     if (mode === 'contour' || !s.plan) return;
     const colors = ['#facc15', '#38bdf8', '#f472b6', '#4ade80', '#fb923c', '#a78bfa'];
-    s.plan.meta.beams.forEach((b, n) => {
+    s.plan.meta.beams.filter((b) => !b.parentId).forEach((b, n) => {
       const machine = machineById(b.machineId);
       const ax = beamAxes(b, machine.sad);
       const j = b.jaws;

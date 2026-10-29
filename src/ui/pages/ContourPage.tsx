@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   MousePointer2, Circle, PenLine, Spline, Eraser, Wand2, Ruler, ArrowUpToLine, ArrowDownToLine, Square, PaintBucket, Waves, Sparkles,
-  ScanSearch, ChevronsUp, ChevronsDown, Expand, Combine, Cpu, Undo2, Redo2, FileOutput, Layers3,
+  ScanSearch, ChevronsUp, ChevronsDown, Expand, Combine, Cpu, Undo2, Redo2, FileOutput, Layers3, BrainCircuit,
 } from 'lucide-react';
 import { useStore, editMask, toast, withBusy, undo, redo, type ToolName } from '../../state/store.ts';
 import { ToolButton, ToolGroup, NumberField, Toggle, Select } from '../common.tsx';
@@ -10,6 +10,7 @@ import { View3D } from '../views/View3D.tsx';
 import { ViewGrid } from '../views/ViewGrid.tsx';
 import { StructurePanel } from '../panels/StructurePanel.tsx';
 import { MarginDialog, BooleanDialog, AutoSegDialog, copySlice } from '../panels/ContourDialogs.tsx';
+import { AiContourDialog } from '../panels/AiContourDialog.tsx';
 import { fillHoles, smoothMask, interpolateSlices, adaptSlice, propagate } from '../../core/maskOps.ts';
 import { exportRtStruct } from '../../core/dicom/export.ts';
 import { saveBytes, safeName } from '../files.ts';
@@ -35,7 +36,7 @@ export function ContourPage() {
   const structFill = useStore((s) => s.structFill);
   const undoN = useStore((s) => s.undo.length);
   const redoN = useStore((s) => s.redo.length);
-  const [dialog, setDialog] = useState<'margin' | 'boolean' | 'auto' | null>(null);
+  const [dialog, setDialog] = useState<'margin' | 'boolean' | 'auto' | 'ai' | null>(null);
   const [propN, setPropN] = useState(10);
   const setTool = (t: ToolName) => useStore.setState({ tool: t });
   const setTs = (p: Partial<typeof ts>) => useStore.setState((s) => ({ toolSettings: { ...s.toolSettings, ...p } }));
@@ -145,6 +146,7 @@ export function ContourPage() {
         <ToolGroup title="Volumes">
           <ToolButton icon={<Expand size={18} />} label="Margin" onClick={() => setDialog('margin')} title="Expand / contract (GTV→CTV→PTV)" />
           <ToolButton icon={<Combine size={18} />} label="Boolean" onClick={() => setDialog('boolean')} title="Union, intersection, subtraction" />
+          <ToolButton icon={<BrainCircuit size={18} />} label="AI contour" onClick={() => setDialog('ai')} title="AI auto-contouring of organs (bowel bag, bladder, femoral heads, lungs, heart, cord, kidneys, liver…)" accent="text-violet-300" />
           <ToolButton icon={<Cpu size={18} />} label="Auto-seg" onClick={() => setDialog('auto')} title="Automatic Body, lungs, bones, thresholds" />
         </ToolGroup>
         <ToolGroup title="Edit">
@@ -213,6 +215,7 @@ export function ContourPage() {
       {dialog === 'margin' && <MarginDialog onClose={() => setDialog(null)} />}
       {dialog === 'boolean' && <BooleanDialog onClose={() => setDialog(null)} />}
       {dialog === 'auto' && <AutoSegDialog onClose={() => setDialog(null)} />}
+      {dialog === 'ai' && <AiContourDialog onClose={() => setDialog(null)} />}
     </div>
   );
 }

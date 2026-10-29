@@ -88,6 +88,7 @@ interface State {
   doseDisplay: DoseDisplay;
   structFill: number; // opacity (0–1) of the light colour fill inside contours; 0 = outlines only
   planHidden: string[]; // structures hidden in Planning / Evaluation views (independent of the contouring eye)
+  hotOverlay: { level: number; region: 'body' | 'target' } | null; // projected hot-dose cloud in the BEV (field-in-field)
   ssVersion: number; // bumps on any mask/structure change
   planVersion: number;
   doseVersion: number;
@@ -125,6 +126,7 @@ export const useStore = create<State>(() => ({
   doseDisplay: { mode: 'lines', levels: [107, 105, 100, 95, 90, 80, 70, 50, 30], washMin: 30, opacity: 0.45, showHotspot: true },
   structFill: 0.25,
   planHidden: [],
+  hotOverlay: null,
   ssVersion: 0,
   planVersion: 0,
   doseVersion: 0,
@@ -582,9 +584,32 @@ export function structureShown(st: StructureMeta, mode: 'contour' | 'plan' | 'ev
   return mode === 'contour' ? st.visible : !get().planHidden.includes(st.id);
 }
 
+/** Geometry a field-in-field sub-field always shares with its parent. */
+const SHARED_WITH_SUBFIELDS = ['machineId', 'energy', 'gantry', 'collimator', 'couch', 'iso', 'wedge'] as const;
+
+/** Copies each parent's geometry onto its sub-fields and drops sub-fields whose parent is gone. */
+export function syncSubfields(beams: Beam[]): Beam[] {
+  const byId = new Map(beams.map((b) => [b.id, b]));
+  return beams
+    .filter((b) => !b.parentId || byId.has(b.parentId))
+    .map((b) => {
+      const p = b.parentId ? byId.get(b.parentId)! : null;
+      if (!p) return b;
+      const shared: Partial<Beam> = {};
+      let differs = false;
+      for (const k of SHARED_WITH_SUBFIELDS) {
+        if (JSON.stringify(b[k]) !== JSON.stringify(p[k])) { (shared as Record<string, unknown>)[k] = p[k]; differs = true; }
+      }
+      return differs ? { ...b, ...shared } : b;
+    });
+}
+
+export const subfieldsOf = (beams: Beam[], id: string) => beams.filter((b) => b.parentId === id);
+
 export function updatePlan(patch: Partial<PlanMeta>, recalcMu = true) {
   const s = get();
   if (!s.plan) return;
+  if (patch.beams) patch = { ...patch, beams: syncSubfields(patch.beams) };
   set((st) => ({ plan: { meta: { ...s.plan!.meta, ...patch }, dirty: true }, planVersion: st.planVersion + 1 }));
   if (recalcMu && get().dose) recomputeMU();
 }
@@ -605,13 +630,15 @@ export function addBeams(beams: Beam[]) {
 export function deleteBeam(id: string) {
   const s = get();
   if (!s.plan) return;
-  const beams = s.plan.meta.beams.filter((b) => b.id !== id);
+  // A field's sub-fields (field-in-field) go with it
+  const gone = new Set([id, ...subfieldsOf(s.plan.meta.beams, id).map((b) => b.id)]);
+  const beams = s.plan.meta.beams.filter((b) => !gone.has(b.id));
   const mu = { ...s.plan.meta.mu };
-  delete mu[id];
+  for (const g of gone) delete mu[g];
   updatePlan({ beams, mu }, false);
   if (s.dose) {
     const perBeam = new Map(s.dose.perBeam);
-    perBeam.delete(id);
+    for (const g of gone) perBeam.delete(g);
     set({ dose: { ...s.dose, perBeam } });
     recomputeMU();
   }
@@ -760,6 +787,7 @@ export function fieldsMissingNormPoint(): string[] {
   if (!plan || !pt || plan.prescription.normMode !== 'isocentre' && plan.prescription.normMode !== 'refPoint') return [];
   const out: string[] = [];
   for (const b of plan.beams) {
+    if (b.parentId) continue; // sub-fields may block the point on purpose; their MU follow the parent's output
     const m = machineById(b.machineId);
     const ax = beamAxes(b, m.sad);
     const q = projectToIso(ax, pt, 'collimator');
@@ -789,20 +817,29 @@ export function recomputeMU() {
   if (rx.normMode !== 'none') {
     const pt = normPoint();
     const wSum = plan.beams.reduce((a, b) => a + Math.max(0, b.weight), 0) || 1;
-    for (const b of plan.beams) {
-      const d = s.dose.perBeam.get(b.id);
-      if (!d || !pt) continue;
-      let dpmu = sampleGrid(s.dose.grid, d, pt);
+    const dpmuOf = (b: Beam): number => {
+      const d = s.dose!.perBeam.get(b.id);
+      if (!d || !pt) return 0;
+      let dpmu = sampleGrid(s.dose!.grid, d, pt);
       if (dpmu < 1e-4) {
         // The beam misses the normalisation point: weight it at its own isocentre instead
-        dpmu = sampleGrid(s.dose.grid, d, b.iso);
+        dpmu = sampleGrid(s.dose!.grid, d, b.iso);
       }
       if (dpmu < 1e-4) {
         let mx = 0;
         for (const v of d) if (v > mx) mx = v;
         dpmu = mx * 0.8;
       }
-      mu[b.id] = dpmu > 0 ? ((b.weight / wSum) * dFx * (rx.normPercent / 100)) / dpmu : 0;
+      return dpmu;
+    };
+    const byId = new Map(plan.beams.map((b) => [b.id, b]));
+    for (const b of plan.beams) {
+      if (!s.dose.perBeam.has(b.id) || !pt) continue;
+      // Sub-fields use their parent's output, so a field's weight splits between its segments in proportion to MU
+      // (their own dose at the normalisation point may be blocked on purpose).
+      const parent = b.parentId ? byId.get(b.parentId) : undefined;
+      const dpmu = parent && s.dose.perBeam.has(parent.id) ? dpmuOf(parent) : dpmuOf(b);
+      mu[b.id] = dpmu > 0 ? ((Math.max(0, b.weight) / wSum) * dFx * (rx.normPercent / 100)) / dpmu : 0;
     }
   }
   set((st) => ({ plan: st.plan ? { ...st.plan, meta: { ...st.plan.meta, mu } } : null }));

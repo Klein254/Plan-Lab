@@ -53,9 +53,9 @@ export function BeamList() {
             const beamStale = !dose || dose.signatures[b.id] === undefined || stale;
             return (
               <tr key={b.id} onClick={() => useStore.setState({ selectedBeamId: b.id })} className={cx('cursor-pointer border-b border-white/[0.03]', b.id === sel ? 'bg-sky-500/10' : 'hover:bg-white/[0.03]')}>
-                <td className="py-1.5 pl-2">
-                  <span className="mr-1.5 text-slate-500">{n + 1}.</span>
-                  <span className="text-slate-100">{b.name}</span>
+                <td className={cx('py-1.5', b.parentId ? 'pl-6' : 'pl-2')}>
+                  {b.parentId ? <span className="mr-1 text-pink-300">↳</span> : <span className="mr-1.5 text-slate-500">{n + 1 - plan.beams.slice(0, n).filter((x) => x.parentId).length}.</span>}
+                  <span className={b.parentId ? 'text-pink-100' : 'text-slate-100'}>{b.name}</span>
                   {b.wedge.type !== 'none' && <span className="ml-1 text-sky-300">W{b.wedge.angle}</span>}
                 </td>
                 <td className="text-right text-slate-300 tabular-nums">{b.gantry.toFixed(0)}</td>
@@ -87,6 +87,8 @@ export function BeamEditor() {
   const targets = ss.meta.structures.filter((x) => !ss.masks.get(x.id)!.isEmpty() && x.type !== 'EXTERNAL');
   const defaultTarget = beam.autoMlc?.structureId ?? plan.prescription.targetId ?? targets.find((t) => TARGET_TYPES.includes(t.type))?.id ?? '';
   const follows = beam.autoMlc ? ss.meta.structures.find((x) => x.id === beam.autoMlc!.structureId) : null;
+  const parent = beam.parentId ? plan.beams.find((b) => b.id === beam.parentId) : undefined;
+  const segTotal = parent ? parent.weight + plan.beams.filter((b) => b.parentId === parent.id).reduce((a, b) => a + b.weight, 0) : 0;
 
   // Geometry changes keep auto-MLC beams conformed to their structure
   const geo = (patch: Partial<Beam>) => updateBeam(beam.id, refitIfAuto({ ...beam, ...patch }));
@@ -99,21 +101,28 @@ export function BeamEditor() {
       title={`Field: ${beam.name}`}
       actions={
         <>
-          <IconBtn title="Add the opposed field (gantry + 180°)" onClick={() => {
+          {!parent && <IconBtn title="Add the opposed field (gantry + 180°)" onClick={() => {
             const g = normAngle(beam.gantry + 180);
             let nb: Beam = { ...beam, id: newId('b'), gantry: g, name: g === 180 ? 'PA' : g === 0 ? 'AP' : g === 90 ? 'LT LAT' : g === 270 ? 'RT LAT' : `${beam.name} opp`, collimator: normAngle(-beam.collimator), mlc: beam.mlc ? { x1: [...beam.mlc.x1], x2: [...beam.mlc.x2] } : null };
             nb = refitIfAuto(nb);
             addBeams([nb]);
-          }}><FlipHorizontal2 size={14} /></IconBtn>
+          }}><FlipHorizontal2 size={14} /></IconBtn>}
           <IconBtn title="Duplicate" onClick={() => addBeams([{ ...beam, id: newId('b'), name: `${beam.name} copy`, mlc: beam.mlc ? { x1: [...beam.mlc.x1], x2: [...beam.mlc.x2] } : null }])}><Copy size={14} /></IconBtn>
           <IconBtn title="Delete field" danger onClick={() => deleteBeam(beam.id)}><Trash2 size={14} /></IconBtn>
         </>
       }
     >
       <div className="space-y-3 p-3">
+        {parent && (
+          <div className="rounded-md bg-pink-500/10 px-2.5 py-1.5 text-[11px] text-pink-100 ring-1 ring-pink-400/20">
+            Field-in-field segment of <button className="underline" onClick={() => useStore.setState({ selectedBeamId: parent.id })}>{parent.name}</button>: it shares the
+            field's angles, isocentre, energy and wedge. Shape it by dragging its leaves in the BEV. It carries {((100 * beam.weight) / (segTotal || 1)).toFixed(0)}% of the field's MU.
+          </div>
+        )}
         <div className="flex gap-2">
           <input value={beam.name} onChange={(e) => updateBeam(beam.id, { name: e.target.value })} className="h-7 min-w-0 flex-1 rounded-md bg-black/40 px-2 text-sm ring-1 ring-white/10 outline-none focus:ring-sky-400/60" />
         </div>
+        <fieldset disabled={!!parent} className="space-y-3 disabled:opacity-60">
         <div className="grid grid-cols-2 gap-2">
           <Select label="Machine" value={beam.machineId} onChange={(v) => {
             const m = lib.machines.find((x) => x.id === v)!;
@@ -149,6 +158,7 @@ export function BeamEditor() {
             ))}
           </div>
         </div>
+        </fieldset>
         <div>
           <div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
             <span>Jaws at isocentre (cm) · {cm(beam.jaws.x2 - beam.jaws.x1).toFixed(1)} × {cm(beam.jaws.y2 - beam.jaws.y1).toFixed(1)}</span>
@@ -162,7 +172,7 @@ export function BeamEditor() {
           </div>
           <div className="mt-1 text-[10px] text-slate-500">Asymmetric jaws: X1/Y1 are negative coordinates. "½" closes a jaw to the axis (half-beam).</div>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <fieldset disabled={!!parent} className="grid grid-cols-3 gap-2 disabled:opacity-60">
           <Select label="Wedge" value={beam.wedge.type} onChange={(v) => updateBeam(beam.id, { wedge: { ...beam.wedge, type: v as Beam['wedge']['type'], angle: v === 'none' ? 0 : beam.wedge.angle || 30 } })} options={[
             { value: 'none', label: 'None' },
             ...(machine.physicalWedges.length ? [{ value: 'physical', label: 'Physical' }] : []),
@@ -180,18 +190,18 @@ export function BeamEditor() {
               ]} />
             </>
           )}
-        </div>
+        </fieldset>
         {beam.wedge.type === 'physical' && Math.max(beam.jaws.x2 - beam.jaws.x1, beam.jaws.y2 - beam.jaws.y1) > machine.physicalWedgeMaxWidth && (
           <div className="text-[11px] text-amber-300">Field larger than this wedge allows ({cm(machine.physicalWedgeMaxWidth)} cm).</div>
         )}
         <div className="flex items-center gap-2">
-          <NumberField label="Weight" value={beam.weight} step={0.05} min={0} max={10} onChange={(v) => updateBeam(beam.id, { weight: v })} width="w-16" />
+          <NumberField label={parent ? 'Segment weight' : 'Weight'} value={beam.weight} step={0.05} min={0} max={10} onChange={(v) => updateBeam(beam.id, { weight: v })} width="w-16" />
           {plan.prescription.normMode === 'none' && (
             <NumberField label={machine.doseUnit === 'min' ? 'Time' : 'MU'} unit={machine.doseUnit === 'min' ? 'min' : ''} value={plan.mu[beam.id] ?? 0} onChange={(v) => updatePlan({ mu: { ...plan.mu, [beam.id]: v } })} width="w-20" />
           )}
         </div>
         {/* Auto MLC */}
-        <div className="rounded-lg bg-white/[0.03] p-2.5 ring-1 ring-white/5">
+        {!parent && <div className="rounded-lg bg-white/[0.03] p-2.5 ring-1 ring-white/5">
           <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
             {machine.mlc ? 'Auto-MLC' : 'Fit jaws to structure'}
             {follows && <Badge tone="green">follows {follows.name} + {beam.autoMlc!.margin} mm</Badge>}
@@ -201,7 +211,7 @@ export function BeamEditor() {
             {machine.mlc && <Button size="sm" variant="ghost" onClick={() => updateBeam(beam.id, { mlc: openMlc(machine, beam.jaws), autoMlc: null })}>Open leaves</Button>}
           </div>
           {machine.mlc && <div className="mt-1.5 text-[10px] text-slate-500">Or drag inside the field in the BEV to shape the leaves by hand.</div>}
-        </div>
+        </div>}
       </div>
       {autoMlc && <AutoMlcDialog beamId={beam.id} onClose={() => setAutoMlc(false)} />}
     </Panel>

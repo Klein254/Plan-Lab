@@ -118,6 +118,8 @@ export interface Beam {
   weight: number; // relative contribution at the normalisation point
   autoMlc: { structureId: string; margin: number; fit: 'outside' | 'centre' | 'inside' } | null;
   bolusId?: string | null;
+  /** Field-in-field: a sub-field (segment) of this parent field. It shares the parent's geometry, has its own MLC. */
+  parentId?: string | null;
 }
 
 export type NormMode = 'isocentre' | 'refPoint' | 'targetMean' | 'targetMedian' | 'targetD95' | 'none';

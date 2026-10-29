@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Manager};
 
+mod ai;
+
 fn store_root(app: &AppHandle) -> Result<PathBuf, String> {
   let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("store");
   fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -148,7 +150,8 @@ pub fn run() {
     }))
     .plugin(tauri_plugin_window_state::Builder::default().build())
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![kv_put, kv_get, kv_list, kv_remove, write_file])
+    .manage(ai::AiState::default())
+    .invoke_handler(tauri::generate_handler![kv_put, kv_get, kv_list, kv_remove, write_file, ai::ai_status, ai::ai_install, ai::ai_segment, ai::ai_cancel])
     .run(tauri::generate_context!())
     .expect("error while running PlanLab");
 }

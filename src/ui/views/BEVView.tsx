@@ -4,6 +4,7 @@ import { useStore, machineById, updateBeam, structureShown, voxelToPatient, addB
 import { beamAxes, collToDisplay, displayToColl, projectToIso, normAngle, type BeamAxes } from '../../core/geometry.ts';
 import { projectStructure, apertureOutline } from '../../core/bev.ts';
 import { makeBeam, conformBeam } from '../../state/planTools.ts';
+import { projectDoseCloud } from '../../core/fif.ts';
 import { isoSegments } from '../../core/contour2d.ts';
 import type { Beam, Vec3, Volume } from '../../core/types.ts';
 
@@ -99,6 +100,7 @@ function volumeTexture(id: string, v: Volume) {
 
 
 const projCache = new Map<string, { seg: Float32Array; x0: number; y0: number; res: number }>();
+const hotCache = new Map<string, { seg: Float32Array; x0: number; y0: number; res: number }>();
 
 type Drag =
   | { kind: 'jaw'; edge: 'x1' | 'x2' | 'y1' | 'y2' }
@@ -295,6 +297,41 @@ export function BEVView() {
       }
     };
 
+    // Hot-dose cloud (field-in-field): where dose ≥ the chosen level projects in this view
+    const hot = s.hotOverlay;
+    if (hot && s.dose?.total && s.plan) {
+      const rxGy = s.plan.meta.prescription.totalDose;
+      const key = `${s.doseVersion}:${hot.level}:${hot.region}:${ax.source.join(',')}:${ax.u0.join(',')}`;
+      let pr = hotCache.get(key);
+      if (!pr) {
+        const regionId = hot.region === 'target' ? s.plan.meta.prescription.targetId : s.ss?.meta.structures.find((x) => x.type === 'EXTERNAL')?.id;
+        const m = regionId ? s.ss?.masks.get(regionId) : undefined;
+        const v = s.ct.volume;
+        const inside = m ? (p: Vec3) => m.get(Math.round((p[0] - v.origin[0]) / v.spacing[0]), Math.round((p[1] - v.origin[1]) / v.spacing[1]), Math.round((p[2] - v.origin[2]) / v.spacing[2])) === 1 : undefined;
+        const r = projectDoseCloud(s.dose.grid, s.dose.total, (hot.level / 100) * rxGy, ax, 'display', inside, 2, 260);
+        pr = r ? { seg: isoSegments(r.data, r.w, r.h, 0.5), x0: r.x0, y0: r.y0, res: r.res } : { seg: new Float32Array(), x0: 0, y0: 0, res: 1 };
+        hotCache.clear();
+        hotCache.set(key, pr);
+      }
+      if (pr.seg.length) {
+        ctx.strokeStyle = '#ff2d95';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        for (let n = 0; n < pr.seg.length; n += 4) {
+          const [a1, b1] = toScreen(pr.x0 + pr.seg[n] * pr.res, pr.y0 + pr.seg[n + 1] * pr.res);
+          const [a2, b2] = toScreen(pr.x0 + pr.seg[n + 2] * pr.res, pr.y0 + pr.seg[n + 3] * pr.res);
+          ctx.moveTo(a1, b1);
+          ctx.lineTo(a2, b2);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff7ac0';
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
+        ctx.fillText(`≥ ${hot.level}% dose (projected)`, 10, h - 26);
+      }
+    }
+
     if (!geo.beam) {
       // Reference view: fields that look along this direction are outlined (dashed) for orientation
       graticule(ax);
@@ -341,6 +378,25 @@ export function BEVView() {
         if (close) ctx.closePath();
       };
       const j = beam.jaws;
+      // A sub-field (field-in-field) shows its parent's open aperture for reference
+      const parent = beam.parentId ? s.plan?.meta.beams.find((b) => b.id === beam.parentId) : undefined;
+      if (parent) {
+        const out = apertureOutline(parent, machine);
+        if (out.length >= 6) {
+          const pts: [number, number][] = [];
+          for (let n = 0; n < out.length; n += 2) pts.push([out[n], out[n + 1]]);
+          ctx.strokeStyle = 'rgba(125,211,252,0.9)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 4]);
+          poly(pts);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#7dd3fc';
+          ctx.font = '600 11px Inter, system-ui, sans-serif';
+          const [px, py] = coll(pts[0][0], pts[0][1]);
+          ctx.fillText(`${parent.name} (open field)`, px + 4, py + 14);
+        }
+      }
       // MLC leaves
       if (machine.mlc && beam.mlc) {
         const B = machine.mlc.boundaries;

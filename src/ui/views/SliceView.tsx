@@ -206,7 +206,7 @@ export function SliceView({ plane, mode, onMaximize, maximized }: Props) {
         return voxelToPlane(plane, nz, vox);
       };
       const axis = (plane === 'axial' ? 2 : plane === 'sagittal' ? 0 : 1) as 0 | 1 | 2;
-      s.plan.meta.beams.forEach((b, n) => {
+      s.plan.meta.beams.filter((b) => !b.parentId).forEach((b, n) => {
         const machine = machineById(b.machineId);
         const sec = fieldSection(b, machine, axis, axisValue);
         const col = BEAM_COLORS[n % BEAM_COLORS.length];

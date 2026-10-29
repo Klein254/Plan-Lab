@@ -5,6 +5,7 @@ import { inflateSync } from 'fflate';
 // @ts-expect-error - the package ships no type declarations
 import { Decoder as JpegLosslessDecoder } from 'jpeg-lossless-decoder-js';
 import type { Vec3 } from '../types.ts';
+import { decodeFrame } from './codecs.ts';
 
 type DataSet = DP.DataSet;
 
@@ -185,12 +186,20 @@ function decodePixels(ds: DataSet, inst: ParsedInstance): Int16Array {
         u.set(bytesOut.subarray(0, n * 2));
         raw = signed ? new Int16Array(u.buffer) : new Uint16Array(u.buffer);
       } else raw = bytesOut;
+    } else if (ts === '1.2.840.10008.1.2.4.90' || ts === '1.2.840.10008.1.2.4.91' || ts === '1.2.840.10008.1.2.4.80' || ts === '1.2.840.10008.1.2.4.81') {
+      // JPEG 2000 / JPEG-LS (WebAssembly decoders, loaded by loadCodecs() before parsing)
+      const d = decodeFrame(ts.startsWith('1.2.840.10008.1.2.4.9') ? 'j2k' : 'jls', frame);
+      if (d.bits > 8) {
+        const u = new Uint8Array(n * 2);
+        u.set(d.bytes.subarray(0, n * 2));
+        raw = (d.signed ?? signed) ? new Int16Array(u.buffer) : new Uint16Array(u.buffer);
+      } else raw = d.bytes;
     } else {
       const names: Record<string, string> = {
         '1.2.840.10008.1.2.4.90': 'JPEG 2000 (lossless)', '1.2.840.10008.1.2.4.91': 'JPEG 2000',
         '1.2.840.10008.1.2.4.80': 'JPEG-LS (lossless)', '1.2.840.10008.1.2.4.81': 'JPEG-LS', '1.2.840.10008.1.2.4.50': 'JPEG baseline (lossy)',
       };
-      throw new Error(`${inst.fileName}: compression ${names[ts] ?? ts} isn't supported. Export the CT uncompressed (or JPEG Lossless / RLE) and import again.`);
+      throw new Error(`${inst.fileName}: compression ${names[ts] ?? ts} isn't supported. Export the CT uncompressed (or JPEG Lossless, JPEG 2000, JPEG-LS or RLE) and import again.`);
     }
   }
   const hu = new Int16Array(n);

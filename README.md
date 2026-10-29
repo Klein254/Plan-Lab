@@ -9,7 +9,7 @@ A radiotherapy treatment planning system for **student training**, for Windows a
 ## Features
 
 **Patients and data**
-- Import DICOM CT from a folder or files (drag and drop works too). Supports uncompressed, RLE, JPEG-Lossless and deflated files, any slice order, flipped orientations and uneven slice spacing (resampled). RT Structure Sets with the same frame of reference are imported as contours.
+- Import DICOM CT from a folder or files (drag and drop works too). Supports uncompressed, RLE, JPEG Lossless, JPEG 2000, JPEG-LS and deflated files, any slice order, flipped orientations and uneven slice spacing (resampled). RT Structure Sets with the same frame of reference are imported as contours.
 - Optional anonymisation for teaching.
 - Everything is stored in PlanLab's local database, so you never need the DICOM files again.
 - Patient-data panel at the bottom: **Basic CT scan → Contoured image(s) → Plans**. Each item can be opened, renamed, saved as a copy or deleted, and has a status (In progress / Completed / Approved).
@@ -25,6 +25,7 @@ A radiotherapy treatment planning system for **student training**, for Windows a
   - **Propagate**: auto-contours neighbouring slices, stopping where the organ ends.
 - Margins (uniform or per direction, GTV→CTV→PTV, with skin cropping), booleans (∪ ∩ − ⊕), fill holes, smooth, copy slice, undo/redo.
 - Auto-segmentation: Body, lungs (left and right), threshold structures (e.g. bones).
+- **AI auto-contouring** (desktop app): TotalSegmentator, a published deep-learning model (mean Dice 0.94 against expert contours), runs on the computer's processor. 36 planning structures are available, with presets by site: bowel bag (RTOG style, with a choice of superior limit), bladder, prostate, femoral heads (cut at the lesser-trochanter level), small bowel, colon, kidneys, liver, lungs, heart, oesophagus, spinal cord, vessels and bones. Install it once from the app (about 2 GB, needs Python 3.10–3.13); after that it works offline. The rectum, optic structures and parotids are not in the open model.
 - Structure library of about 60 targets and OARs with colours, α/β and tolerance doses (QUANTEC-based), editable per structure and in the Library.
 
 **Planning**
@@ -33,6 +34,8 @@ A radiotherapy treatment planning system for **student training**, for Windows a
 - Beam's-eye view with **DRR**: a standard mode and a **skeleton** mode for bony landmarks. Projected contours, draggable jaws and MLC leaves, 1 cm graticule.
 - **Auto-MLC** around any structure with a margin and leaf-fit options. Leaves keep following the target when you change gantry, collimator, couch or isocentre. There's also an editable leaf table.
 - Independent jaws, **half-beam** blocking and field matching: mono-isocentric match, couch kick, and collimator rotation for craniospinal junctions.
+- **Weighting guide**: move each field's weight and see the target coverage, hot spot and organ doses update instantly (no recalculation). *Suggest* finds weights for an even target dose under 105%, sparing the organs you mark as important. Includes a table of typical weights by site.
+- **Field-in-field**: picks a dose level (e.g. 107%), shows where that hot region projects in each field's BEV, and adds sub-fields whose leaves block it, with an automatic share of the field's MU. Work down in steps; segments follow their field's geometry and can be reshaped by dragging leaves.
 - Physical wedges (15/30/45/60°) and virtual wedges; bolus and density overrides.
 - Prescription and normalisation (isocentre, reference point, target mean, median or D95) with beam weights → MU per fraction. Warns when the normalisation point sits on a field edge.
 - 3D dose: TMR / fluence-convolution model with radiological-depth heterogeneity correction, run in the background. Only fields that changed are recalculated. Isodose lines or colour wash, hot spot, and a 3D prescription isodose surface.
